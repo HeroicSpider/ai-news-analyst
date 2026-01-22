@@ -1,13 +1,13 @@
 # 🤖 Autonomous AI News Analyst
 
-![AI Analyst](https://img.shields.io/github/actions/workflow/status/YOUR_USERNAME/ai-news-analyst/daily.yml?label=Daily%20Briefing)
+![AI Analyst](https://github.com/HeroicSpider/ai-news-analyst.git)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![Astro](https://img.shields.io/badge/astro-4.0-orange)
 
 An intelligent, autonomous agent that acts as a 24/7 tech journalist. It scouts for trending stories, researches them using live web search, verifies facts, and publishes a daily briefing—completely without human intervention.
 
-**[View Live Demo](https://your-vercel-app-url.app)** *(Replace with your Vercel URL)*
+**[View Live Demo](https://ai-news-analyst-sable.vercel.app/?_vercel_share=4Xb9Er7toU4eL48KvWsS2gD2cMX4ABL7)** *(Replace with your Vercel URL)*
 
 ---
 
