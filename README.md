@@ -53,7 +53,7 @@ This system uses a **Retrieval-Augmented Generation (RAG)** pipeline orchestrate
 
 1.  **Clone the Repository**
     ```bash
-    git clone [https://github.com/HeroicSpider/ai-news-analyst.git](https://github.com/HeroicSpider/ai-news-analyst.git)
+    git clone https://github.com/HeroicSpider/ai-news-analyst.git
     cd ai-news-analyst
     ```
 
