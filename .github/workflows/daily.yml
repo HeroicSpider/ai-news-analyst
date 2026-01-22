@@ -1,0 +1,62 @@
+name: AI Analyst
+
+on:
+  schedule:
+    # 16:00 UTC = 8:00 AM PST / 9:00 AM PDT
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: true
+
+jobs:
+  research-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Agent Deps
+        run: pip install -r agent/requirements.txt
+        
+      - name: Run Agent
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+        run: python agent/main.py
+
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-report
+          path: agent/run_report.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Build Verification
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit Content
+        if: success()
+        run: |
+          git config --global user.name 'AI Analyst Bot'
+          git config --global user.email 'bot@noreply.github.com'
+          git add src/content/news/
+          # [skip ci] prevents loop
+          git diff --staged --quiet || git commit -m "📰 Briefing $(date +'%Y-%m-%d') [skip ci]"
+          git push

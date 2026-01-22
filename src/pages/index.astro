@@ -1,0 +1,53 @@
+---
+import { getCollection } from 'astro:content';
+const posts = await getCollection('news');
+
+// Sort by date (newest first)
+posts.sort((a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf());
+
+const latest = posts[0];
+const { Content } = latest ? await latest.render() : { Content: null };
+---
+
+<html lang="en">
+	<head>
+		<title>AI Tech Analyst</title>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width" />
+        <style>
+            body { 
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+                max-width: 800px; 
+                margin: 0 auto; 
+                padding: 2rem; 
+                line-height: 1.6; 
+                color: #333;
+            }
+            h1 { font-size: 2.5rem; margin-bottom: 0.5rem; color: #111; }
+            h2 { margin-top: 2rem; border-bottom: 2px solid #eee; padding-bottom: 0.5rem; }
+            a { color: #2563eb; text-decoration: none; font-weight: 500; }
+            a:hover { text-decoration: underline; }
+            ul { padding-left: 1.2rem; }
+            li { margin-bottom: 0.5rem; }
+            footer { margin-top: 4rem; color: #666; font-size: 0.9rem; text-align: center; }
+        </style>
+	</head>
+	<body>
+        {latest ? (
+            <main>
+                <article>
+                    <Content />
+                </article>
+                <footer>
+                    <hr />
+                    <p>Generated automatically by your AI Analyst on {latest.data.pubDate.toLocaleDateString()}</p>
+                </footer>
+            </main>
+        ) : (
+            <div style="text-align: center; margin-top: 3rem;">
+                <h1>Still working...</h1>
+                <p>No briefings available yet. Run the Python agent to generate news.</p>
+            </div>
+        )}
+	</body>
+</html>
