@@ -27,9 +27,6 @@ However, instead of building a simple wrapper around an LLM that just summarizes
 
 This system uses a **Retrieval-Augmented Generation (RAG)** pipeline orchestrated by Python and GitHub Actions.
 
-![Architecture Diagram](https://via.placeholder.com/800x400?text=Replace+with+Real+Architecture+Diagram)
-*(Note: Replace this placeholder with a real diagram for production use)*
-
 1.  **The Scout (Signal):**
     * Queries **Hacker News API** or **RSS Feeds** (TechCrunch, Wired, etc.).
     * Applies a custom **Hotness Algorithm**: `Score = (1 / Rank) * e^(-AgeHours / 24)`. This prioritizes breaking news over stale "top" posts.
