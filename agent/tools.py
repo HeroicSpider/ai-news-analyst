@@ -41,12 +41,20 @@ def fetch_rss_feed(feed_url, limit=3):
             title = title_tag.text if (title_tag is not None and title_tag.text) else "Untitled Story"
 
             url = ""
-            link_tag = item.find(f"{namespace}link")
-            if link_tag is not None:
-                url = link_tag.attrib.get("href") or link_tag.text
-            if not url:
-                 link_tag = item.find("link")
-                 if link_tag is not None: url = link_tag.text
+            # Robust Atom Link Extraction (Prefer rel="alternate" or None)
+            if namespace:
+                links = item.findall(f"{namespace}link")
+                for link in links:
+                    rel = link.attrib.get("rel")
+                    if rel in (None, "", "alternate"):
+                        url = link.attrib.get("href")
+                        if url:
+                            break
+            else:
+                # Standard RSS
+                link_tag = item.find("link")
+                if link_tag is not None:
+                    url = link_tag.text
 
             if url:
                 candidates.append({"title": title, "url": url, "score": 100 - i})
@@ -86,13 +94,18 @@ def fetch_hn_top_stories(limit=3, scan_depth=30):
         return []
 
 # --- 2. URL NORMALIZATION ---
-URL_RE = re.compile(r'https?://[^ \s\]\[")>]+')
+# Fix: Broader regex to capture URLs with parentheses (Wikipedia style)
+URL_RE = re.compile(r'https?://\S+')
 
 def _clean_raw_url(u: str) -> str:
     try: u = unquote(u)
     except: pass
-    if "](" in u: u = u.split("](")[0]
-    u = u.lstrip("<").rstrip(".,]\"')> ")
+    
+    # Clean leading/trailing punctuation but preserve ')' for now
+    u = u.lstrip("<").rstrip(".,]\"'> ")
+    
+    # Fix: Recursive parenthesis balancing to handle markdown trailing ')'
+    # Example: (See: https://wiki.com/Foo_(Bar)) -> https://wiki.com/Foo_(Bar)
     while u.endswith(")") and u.count(")") > u.count("("):
         u = u[:-1]
     return u
@@ -102,6 +115,11 @@ def normalize_url(u: str) -> str:
     try:
         u = unquote(u)
         p = urlparse(u)
+        
+        # Hardening: Check for valid scheme/netloc before reconstructing
+        if p.scheme not in ('http', 'https') or not p.netloc:
+            return u
+
         scheme = "https" if p.scheme in ("http", "https") else p.scheme
         netloc = p.netloc.lower()
         q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
@@ -182,20 +200,21 @@ def safe_get_market_snapshot(text: str, timeout=5) -> str:
     if not found_ticker: return ""
 
     # STRATEGY SELECTION BASED ON OS
-    # Windows: Use Threads (Fast startup, no spawn overhead)
-    # Linux/Production: Use Process (Robust, Hard Kill support)
-    
     if os.name == 'nt':
         # --- WINDOWS STRATEGY (Threads) ---
+        # Note: Threads cannot be hard-killed on Windows. 
+        # We unblock the main program on timeout, but the worker thread may linger until script exit.
+        executor = ThreadPoolExecutor(max_workers=1)
         try:
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_fetch_ticker_info, found_ticker)
-                price, prev = future.result(timeout=timeout)
+            future = executor.submit(_fetch_ticker_info, found_ticker)
+            price, prev = future.result(timeout=timeout)
         except TimeoutError:
             logger.warning(f"Market data timed out for {found_ticker}")
             return ""
         except Exception:
             return ""
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     else:
         # --- LINUX/PROD STRATEGY (Multiprocessing) ---
         q = Queue()
