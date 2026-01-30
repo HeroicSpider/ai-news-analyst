@@ -1,3 +1,4 @@
+import os
 import re
 import math
 import requests
@@ -7,9 +8,10 @@ import yfinance as yf
 import warnings
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse, unquote
+from multiprocessing import Process, Queue
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
-# Suppress the "Timestamp.utcnow" warning from yfinance internals
+# Suppress yfinance warnings
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*Timestamp.utcnow is deprecated.*")
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,7 @@ def fetch_rss_feed(feed_url, limit=3):
         return []
 
 def fetch_hn_top_stories(limit=3, scan_depth=30):
+    """Specific fetcher for Hacker News API."""
     try:
         def calculate_hotness(rank, time_posted_unix):
             if rank == 0: return 0 
@@ -83,17 +86,13 @@ def fetch_hn_top_stories(limit=3, scan_depth=30):
         return []
 
 # --- 2. URL NORMALIZATION ---
-# Fix: Robust regex that ignores brackets/parentheses at the boundaries
 URL_RE = re.compile(r'https?://[^ \s\]\[")>]+')
 
 def _clean_raw_url(u: str) -> str:
     try: u = unquote(u)
     except: pass
-    # Fix: Aggressively strip markdown artifacts
     if "](" in u: u = u.split("](")[0]
     u = u.lstrip("<").rstrip(".,]\"')> ")
-    
-    # Fix: Recursive parenthesis balancing
     while u.endswith(")") and u.count(")") > u.count("("):
         u = u[:-1]
     return u
@@ -127,7 +126,6 @@ def terminal_citation_url(bullet: str) -> str | None:
     candidates = extract_urls(bullet)
     if not candidates:
         return None
-    # Assume the very last URL mentioned is the citation
     return candidates[-1]
 
 def validate_analysis(analysis_dict: dict, allowed_urls: list[str]) -> bool:
@@ -136,31 +134,37 @@ def validate_analysis(analysis_dict: dict, allowed_urls: list[str]) -> bool:
     if not bullets: return True
 
     for bullet in bullets:
-        # 1. Find the last URL (Citation)
         cited_url_norm = terminal_citation_url(bullet)
         
         if not cited_url_norm:
              raise ValueError(f"Bullet has no citation URL. Text: {bullet[-50:]}")
 
-        # 2. Check if Citation is Allowed
         if cited_url_norm not in normalized_allowed:
             raise ValueError(f"Citation URL not in allowlist: {cited_url_norm}")
 
-        # 3. Hallucination Check (Body links)
         found_urls = extract_urls(bullet)
         for u in found_urls:
-            # We allow the terminal link to appear multiple times
             if u != cited_url_norm and u not in normalized_allowed:
                  raise ValueError(f"Hallucinated URL in text body: {u}")
     return True
 
-# --- 4. FINANCIALS (THREADED FOR WINDOWS) ---
+# --- 4. FINANCIALS (HYBRID: THREADS FOR WINDOWS, PROCESS FOR LINUX) ---
 def _fetch_ticker_info(ticker):
+    """The actual logic to fetch data."""
     stock = yf.Ticker(ticker)
     info = stock.fast_info
+    
     def get_val(obj, key):
         return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+        
     return get_val(info, 'last_price'), get_val(info, 'previous_close')
+
+def _fetch_ticker_info_process(ticker, q):
+    """Wrapper for Multiprocessing."""
+    try: 
+        q.put(_fetch_ticker_info(ticker))
+    except Exception: 
+        q.put((None, None))
 
 def safe_get_market_snapshot(text: str, timeout=5) -> str:
     ticker_map = {"NVIDIA": "NVDA", "Tesla": "TSLA", "Apple": "AAPL", "Google": "GOOGL", 
@@ -168,7 +172,6 @@ def safe_get_market_snapshot(text: str, timeout=5) -> str:
     
     text_lower = text.lower()
     
-    # Improved Matching (Word Boundary)
     found_ticker = None
     for company, ticker in ticker_map.items():
         pattern = r'\b' + re.escape(company.lower()) + r'\b'
@@ -178,19 +181,38 @@ def safe_get_market_snapshot(text: str, timeout=5) -> str:
             
     if not found_ticker: return ""
 
-    # Threaded Execution (Fast on Windows)
-    try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_fetch_ticker_info, found_ticker)
-            price, prev = future.result(timeout=timeout)
-            
-        if not price or not prev or prev == 0: return ""
-        pct = ((price - prev) / prev) * 100
-        return f" ({found_ticker}: ${price:.2f} {pct:+.1f}%)"
-        
-    except TimeoutError:
-        logger.warning(f"Market data timed out for {found_ticker}")
-        return ""
-    except Exception as e:
-        logger.warning(f"Market data failed for {found_ticker}: {e}")
-        return ""
+    # STRATEGY SELECTION BASED ON OS
+    # Windows: Use Threads (Fast startup, no spawn overhead)
+    # Linux/Production: Use Process (Robust, Hard Kill support)
+    
+    if os.name == 'nt':
+        # --- WINDOWS STRATEGY (Threads) ---
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_fetch_ticker_info, found_ticker)
+                price, prev = future.result(timeout=timeout)
+        except TimeoutError:
+            logger.warning(f"Market data timed out for {found_ticker}")
+            return ""
+        except Exception:
+            return ""
+    else:
+        # --- LINUX/PROD STRATEGY (Multiprocessing) ---
+        q = Queue()
+        p = Process(target=_fetch_ticker_info_process, args=(found_ticker, q))
+        p.start()
+        p.join(timeout)
+
+        if p.is_alive():
+            p.terminate()
+            p.join()
+            logger.warning(f"Market data timed out for {found_ticker} (Process Killed)")
+            return ""
+
+        if q.empty(): return ""
+        price, prev = q.get()
+
+    # Common Formatting Logic
+    if not price or not prev or prev == 0: return ""
+    pct = ((price - prev) / prev) * 100
+    return f" ({found_ticker}: ${price:.2f} {pct:+.1f}%)"
